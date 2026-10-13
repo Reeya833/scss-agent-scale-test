@@ -30,6 +30,7 @@ jobs:
         with:
           repository: Reeya833/scss-design-token-agent
           ref: main
+          token: ${{ secrets.AGENT_REPO_TOKEN }}
           path: agent
 
       - name: Set up Python
