@@ -1,0 +1,18 @@
+name: Large Repository SCSS Agent Test
+
+on:
+  pull_request:
+    paths:
+      - '**/*.scss'
+      - '.github/workflows/scss-agent-large-repo-test.yml'
+      - 'agent-test/**'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  scss-token-review:
+    uses: Reeya833/scss-design-token-agent/.github/workflows/scss-review.yml@c92000e7550e4bfd062247d5a78b41afbdfb250c
+    with:
+      token-file: agent-test/variables.scss
