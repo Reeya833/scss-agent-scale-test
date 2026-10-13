@@ -11,6 +11,8 @@
 Free and open source HTML dashboard UI kit built on Bootstrap 5.
 </p>
 
+<!-- Retrigger PR workflow after reusable SCSS review workflow update. -->
+
 <p align="center">
 <a href="https://www.npmjs.com/package/@tabler/core" target="_blank"><img src="https://img.shields.io/npm/v/@tabler/core?color=1864ab&label=Latest+version" alt="NPM version"></a>
 <a href="https://www.npmjs.com/package/@tabler/core" target="_blank"><img alt="NPM Downloads" src="https://img.shields.io/npm/dm/@tabler/core?color=1971c2&label=Downloads"></a>
