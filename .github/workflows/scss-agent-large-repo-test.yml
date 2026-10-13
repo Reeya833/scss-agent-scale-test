@@ -45,29 +45,91 @@ jobs:
         run: |
           python - <<'PY'
           import os
+          import re
           import subprocess
           import sys
+          from collections import OrderedDict
           from pathlib import Path
+
+          repo_root = Path.cwd()
+
+          token_sources = [
+              repo_root / "core" / "scss" / "_settings.scss",
+              repo_root / "core" / "scss" / "_variables.scss",
+          ]
+
+          token_pattern = re.compile(
+              r"^\s*(\$[\w-]+)\s*:\s*([^;]+?)(?:\s*!default)?\s*;\s*$"
+          )
+          literal_pattern = re.compile(
+              r"^(?:#[0-9a-fA-F]{3,8}|\d+(?:\.\d+)?px)$"
+          )
+
+          generated_token_file = Path(
+              os.environ.get("RUNNER_TEMP", str(repo_root))
+          ) / "scss-real-token-definitions.scss"
+
+          tokens_by_value = OrderedDict()
+
+          for source_file in token_sources:
+              if not source_file.exists():
+                  raise FileNotFoundError(
+                      f"Token source file not found: {source_file}"
+                  )
+
+              for line in source_file.read_text(encoding="utf-8").splitlines():
+                  match = token_pattern.match(line)
+                  if not match:
+                      continue
+
+                  token_name = match.group(1)
+                  token_value = match.group(2).strip()
+
+                  if not literal_pattern.match(token_value):
+                      continue
+
+                  tokens_by_value.setdefault(token_value, []).append(token_name)
+
+          generated_lines = []
+          for token_value, token_names in tokens_by_value.items():
+              for token_name in token_names:
+                  generated_lines.append(f"{token_name}: {token_value};")
+
+          generated_token_file.write_text(
+              "\n".join(generated_lines) + "\n",
+              encoding="utf-8",
+          )
+
+          print(
+              f"Generated token file: {generated_token_file} "
+              f"({len(generated_lines)} tokens)"
+          )
 
           sys.path.insert(0, "../agent/src")
 
-          from scss_token_checker.checker import (
-              read_tokens,
-              analyze_scss_file,
-              generate_report,
+          from scss_token_checker.checker import analyze_scss_file, read_tokens
+
+          unrelated_properties = (
+              "backdrop-filter",
+              "background-image",
+              "box-shadow",
+              "filter",
+              "transform",
           )
 
-          repo_root = Path.cwd()
-          token_file = repo_root / "agent-test" / "variables.scss"
-
-          if not token_file.exists():
-              raise FileNotFoundError(
-                  f"Token file not found: {token_file}"
+          def is_property_compatible(property_name):
+              normalized_name = property_name.lower()
+              return not any(
+                  normalized_name == unrelated
+                  or normalized_name.startswith(f"{unrelated}-")
+                  for unrelated in unrelated_properties
               )
 
           diff = subprocess.run(
               [
-                  "git", "diff", "--name-only",
+                  "git",
+                  "diff",
+                  "--name-only",
                   os.environ["BASE_SHA"],
                   os.environ["HEAD_SHA"],
               ],
@@ -77,12 +139,17 @@ jobs:
           )
 
           changed_files = [
-              name for name in diff.stdout.splitlines()
+              name
+              for name in diff.stdout.splitlines()
               if name.endswith(".scss")
-              and Path(name) != Path("agent-test/variables.scss")
+              and Path(name)
+              not in {
+                  Path("core/scss/_settings.scss"),
+                  Path("core/scss/_variables.scss"),
+              }
           ]
 
-          tokens = read_tokens(str(token_file))
+          tokens = read_tokens(str(generated_token_file))
           findings = []
 
           print(f"Changed SCSS files to scan: {len(changed_files)}")
@@ -93,22 +160,46 @@ jobs:
               if not path.is_file():
                   continue
 
-              file_findings = analyze_scss_file(
-                  str(path), tokens
-              )
+              file_findings = analyze_scss_file(str(path), tokens)
+              file_findings = [
+                  finding
+                  for finding in file_findings
+                  if is_property_compatible(finding["property"])
+              ]
 
               for finding in file_findings:
-                  finding["file"] = path.relative_to(
-                      repo_root
-                  ).as_posix()
+                  finding["file"] = path.relative_to(repo_root).as_posix()
 
               findings.extend(file_findings)
 
-          report = generate_report(findings)
+          report_lines = ["## SCSS Design Token Check", ""]
 
-          Path("scss-token-report.md").write_text(
-              report, encoding="utf-8"
-          )
+          if not findings:
+              report_lines.append(
+                  "No hardcoded values matching existing Tabler design tokens were found."
+              )
+          else:
+              report_lines.extend(
+                  [
+                      f"Found **{len(findings)}** hardcoded value(s) that match existing Tabler design tokens.",
+                      "",
+                      "| SCSS file | Line | Property | Hardcoded value | Matching token |",
+                      "|---|---:|---|---|---|",
+                  ]
+              )
+
+              for finding in findings:
+                  report_lines.append(
+                      f"| `{finding['file']}` "
+                      f"| {finding['line']} "
+                      f"| `{finding['property']}` "
+                      f"| `{finding['value']}` "
+                      f"| `{', '.join(finding['tokens'])}` |"
+                  )
+
+          report = "\n".join(report_lines)
+
+          Path("scss-token-report.md").write_text(report, encoding="utf-8")
 
           with open(os.environ["GITHUB_OUTPUT"], "a") as output:
               output.write(f"findings_count={len(findings)}\n")
